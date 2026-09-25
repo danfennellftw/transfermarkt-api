@@ -6,6 +6,8 @@ from dateutil import parser
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
 
 class AuditMixin(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -30,9 +32,19 @@ class TransfermarktBaseModel(BaseModel):
         check_fields=False,
     )
     def parse_str_to_date(cls, v: str):
+        if not v:
+            return None
         try:
-            return parser.parse(v).date() if v else None
-        except parser.ParserError:
+            # ISO strings are unambiguous; dayfirst=True would misread them
+            # ("2025-03-12" -> 3 Dec), so they bypass the day-first parse.
+            if ISO_DATE.match(v):
+                return parser.isoparse(v).date()
+            # transfermarkt.com renders numeric dates day-first (03/12/2025 is
+            # 3 Dec). dateutil defaults to month-first, which swapped day and
+            # month whenever the day was 12 or under and fell back to day-first
+            # otherwise, so the bad dates still looked valid.
+            return parser.parse(v, dayfirst=True).date()
+        except (parser.ParserError, ValueError, OverflowError):
             return None
 
     @field_validator(
